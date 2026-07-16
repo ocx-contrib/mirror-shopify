@@ -33,11 +33,12 @@ jobs:
       - uses: ocx-sh/setup-ocx@de8e3366f812941423985eaccae28663ef192e8b  # v1.3.0
       - id: plan
         name: Plan versions
-        # `GITHUB_TOKEN` is forwarded to the in-process octocrab client so
-        # release-listing runs authenticated (5 000 reqs/h) instead of the
-        # 60/h unauthenticated quota that bites on multi-version runs.
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        # MANUAL EDIT (allow_manual_edits): the `GITHUB_TOKEN` env the generator
+        # normally forwards here is intentionally REMOVED. Shopify's GitHub org
+        # rejects the Actions installation token on its API (exit 69), while
+        # anonymous reads succeed. Discovery runs unauthenticated — 1 release
+        # list call per poll, well under the 60/h anonymous quota. RE-APPLY this
+        # removal after any `ocx-mirror package pipeline generate ci`.
         run: |
           set -euo pipefail
           ocx-mirror package pipeline plan --format json > plan.json
