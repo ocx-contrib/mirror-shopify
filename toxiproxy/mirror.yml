@@ -1,0 +1,175 @@
+extends: ../mirror-base.yml
+
+name: toxiproxy
+
+# Logical index package `shopify/toxiproxy` at the physical path
+# `ghcr.io/ocx-contrib/shopify/toxiproxy` — slash segments, never
+# hyphen-flattened. The first segment must be this repo's own GitHub owner:
+# GITHUB_TOKEN only authorises packages owned by the repo the workflow runs in.
+#
+# Succeeds the flat `ocx.sh/toxiproxy` coordinate this repository published
+# before the grouped layout, the same way mirror-kitware/cmake succeeds
+# mirror-cmake.
+target:
+  registry: ghcr.io
+  repository: ocx-contrib/shopify/toxiproxy
+
+source:
+  type: github_release
+  owner: Shopify
+  repo: toxiproxy
+  # Tags: v2.12.0, v2.11.0, … Three fixed digits, leading v.
+  tag_pattern: "^v(?P<version>\\d+\\.\\d+\\.\\d+)$"
+
+# Shopify's GitHub org rejects the Actions installation `GITHUB_TOKEN` on its
+# API (even for public reads) — authenticated `pipeline plan` 403s with exit 69
+# while anonymous reads succeed. The generated discover step hardcodes
+# `GITHUB_TOKEN: secrets.GITHUB_TOKEN`, so we hand-strip that env from the plan
+# step to run discovery unauthenticated (1 release-list call per poll — well
+# under the 60/h anonymous quota). allow_manual_edits drops the
+# verify-generated drift guard so that edit survives. RE-APPLY the token
+# removal after any `ocx-mirror package pipeline generate ci`. See README
+# "Maintenance note".
+allow_manual_edits: true
+
+# ─── libc gate (Phase 3.5) — the evidence, not the conclusion ───────────────
+#
+# toxiproxy is a pure-Go build without cgo, so upstream ships ONE Linux build
+# per arch per binary and it is fully static. Byte-audited on v2.12.0
+# (`../.claude/libc-audit-2026-08-01.json` in the fleet root):
+# toxiproxy-server AND toxiproxy-cli, on amd64 AND arm64, all carry no
+# PT_INTERP and no DT_NEEDED.
+#
+# Requiring nothing of the host means both Linux keys are BARE — no `+libc.*`
+# suffix. Upstream publishes no musl/alpine variant, so there is no counterpart
+# to split against. The container legs (ubuntu + alpine + fedora) live in
+# ../mirror-base.yml and are what turn that claim into evidence.
+#
+# ─── Variants — KEPT, and why (re-verified 2026-08-02) ──────────────────────
+#
+# Three build flavors from one upstream release:
+#   default (unnamed) -> full archive: ships BOTH toxiproxy-server + toxiproxy-cli
+#                        -> bare cascade tags (2.12.0, 2.12, 2, latest)
+#   client            -> raw toxiproxy-cli binary only    -> client-prefixed tags
+#   server            -> raw toxiproxy-server binary only -> server-prefixed tags
+#
+# The standalone per-binary assets were reported gone from v2.12.0. They are
+# NOT: every one of the 15 patterns below resolves EXACTLY ONE asset on every
+# release from v2.5.0 through v2.12.0, checked against the live release list.
+# And both named variants are already published at the predecessor flat
+# coordinate — `ocx package inspect ocx.sh/toxiproxy:client-2.12.0` and
+# `:server-2.12.0` both resolve. Dropping them would delete a shipped surface
+# during a port whose job is to move the coordinate, not change the contract.
+# So all three stay.
+#
+# Resolution was verified BOTH ways: a pattern matching zero assets is silently
+# skipped, not an error — it would yield a green run with a missing platform.
+#
+# ─── Scope — deliberately not carried ───────────────────────────────────────
+#
+# Upstream also publishes, and this mirror does not carry:
+#   *-{freebsd,netbsd,openbsd,solaris}-*        — no GHA runner
+#   toxiproxy_*_linux_*.{apk,deb,rpm}           — distro installers, not bundles
+#   checksums.txt                               — sidecar
+#
+# The anchored ^…$ regexes are what keep those out.
+variants:
+  - default: true
+    assets:
+      linux/amd64:
+        - "^toxiproxy_.*_linux_amd64\\.tar\\.gz$"
+      linux/arm64:
+        - "^toxiproxy_.*_linux_arm64\\.tar\\.gz$"
+      darwin/amd64:
+        - "^toxiproxy_.*_darwin_amd64\\.tar\\.gz$"
+      darwin/arm64:
+        - "^toxiproxy_.*_darwin_arm64\\.tar\\.gz$"
+      windows/amd64:
+        - "^toxiproxy_.*_windows_amd64\\.tar\\.gz$"
+    asset_type:
+      # Binaries (toxiproxy-server[.exe], toxiproxy-cli[.exe]) sit at archive
+      # root alongside CHANGELOG/LICENSE/README — no wrapper dir to strip.
+      # Verified against the real v2.12.0 linux/amd64 tarball.
+      type: archive
+      strip_components: 0
+  - name: client
+    metadata:
+      default: metadata-client.json
+    assets:
+      linux/amd64:
+        - "^toxiproxy-cli-linux-amd64$"
+      linux/arm64:
+        - "^toxiproxy-cli-linux-arm64$"
+      darwin/amd64:
+        - "^toxiproxy-cli-darwin-amd64$"
+      darwin/arm64:
+        - "^toxiproxy-cli-darwin-arm64$"
+      windows/amd64:
+        - "^toxiproxy-cli-windows-amd64\\.exe$"
+    asset_type:
+      # Raw binary renamed to toxiproxy-cli (.exe appended on Windows).
+      type: binary
+      name: toxiproxy-cli
+  - name: server
+    metadata:
+      default: metadata-server.json
+    assets:
+      linux/amd64:
+        - "^toxiproxy-server-linux-amd64$"
+      linux/arm64:
+        - "^toxiproxy-server-linux-arm64$"
+      darwin/amd64:
+        - "^toxiproxy-server-darwin-amd64$"
+      darwin/arm64:
+        - "^toxiproxy-server-darwin-arm64$"
+      windows/amd64:
+        - "^toxiproxy-server-windows-amd64\\.exe$"
+    asset_type:
+      # Raw binary renamed to toxiproxy-server (.exe appended on Windows).
+      type: binary
+      name: toxiproxy-server
+
+metadata:
+  # One file per variant, because the `binaries` claim is what differs between
+  # them. `binaries` is a POSITIVE claim about the interface surface, so the
+  # client bundle must not declare toxiproxy-server. `bin_scan: off` (base)
+  # passes each list through verbatim — there is no `${installPath}/<dir>` scan
+  # target to derive it from, see the base's bin_scan comment — so these lists
+  # ARE the claim, and tests/smoke.star is what re-reads the tree. The two
+  # named variants override this default in their `variants:` entry above.
+  default: metadata.json
+
+catalog:
+  # Resolves against this spec's own directory (unlike `tests.script`, which is
+  # repository-root-relative). The logo lives here rather than at the repo root
+  # because a repo-root logo.* sits in no workflow's `paths:` filter — replacing
+  # it would publish nothing until some unrelated edit happened to fire.
+  logo: logo.svg
+
+versions:
+  min: "2.12.0"
+  # A multiple of the variant count: a variant is a plan ENTRY, not a matrix
+  # axis, so one version costs three entries. 6 = two whole versions per run,
+  # so no run ever publishes a version with a variant missing.
+  new_per_run: 6
+  poll_interval: "0 */6 * * *"
+
+tests:
+  # `script:` resolves from the REPOSITORY ROOT — unlike `metadata.default` and
+  # `catalog.logo` above, which resolve against this spec's own directory.
+  # One script covers all three variants; it runs once per
+  # (version, platform, variant) leg automatically.
+  - name: smoke
+    script: toxiproxy/tests/smoke.star
+
+annotations:
+  # From the Phase 1.5 license gate:
+  #   $ gh api repos/Shopify/toxiproxy/license --jq '.license.spdx_id'
+  #   MIT
+  org.opencontainers.image.licenses: "MIT"
+
+announce:
+  # Spelled out, not derived from target.repository — the logical name and the
+  # physical path are related by convention only.
+  package: shopify/toxiproxy
+  fork: ocx-contrib/index

@@ -1,0 +1,109 @@
+# Shared base for every spec in this repository (Shopify).
+#
+# NOT a spec: it has no name/target/source and is never loaded on its own.
+# Everything a package owns — name, target, source, assets/variants,
+# asset_type, metadata, catalog, tests, versions, announce, annotations —
+# stays in that package's own mirror.yml.
+#
+# ⚠️ `extends:` is a SHALLOW merge of top-level keys. A spec that sets a key
+# below replaces that block OUTRIGHT — there is no per-key merge. `platforms:`
+# is where this bites: it carries BOTH the runner matrix and the container
+# legs, so a child that restates it to tweak one runner silently drops every
+# `containers:` entry. Nothing reds — the legs simply stop existing, and every
+# os.features claim in that spec goes back to being merely asserted. Restate
+# `platforms:` IN FULL or not at all.
+
+skip_prereleases: true
+cascade: true
+
+# The fleet rule. A cascade tag (`latest`, `X`, `X.Y`) re-points on every
+# re-publish; without a build segment the new manifest reuses the bare version
+# tag and orphans the prior digest for registry GC, breaking any `@sha256:` pin
+# in a consumer's ocx.lock. `ocx-mirror package validate` WARNS on
+# `none` + `cascade: true` for exactly this reason.
+#
+# toxiproxy versions as bare semver, so there is no existing +build segment for
+# `date` to collide with — the `none` exception (upstream versions that already
+# carry `+YYYYMMDD`, where `date` empties the mirror) does not apply here. This
+# replaces the flat layout's `build_timestamp: none`, which predates the fleet
+# rule; nothing is published at the new grouped coordinate yet, so the change
+# costs no orphaned digest.
+build_timestamp: date
+
+verify:
+  github_asset_digest: true
+
+concurrency:
+  # Assets are ~7 MB archives / ~10 MB static binaries.
+  max_downloads: 8
+  max_bundles: 4
+  max_pushes: 2
+  rate_limit_ms: 100
+  max_retries: 3
+  compression_threads: 0
+
+# `off`, and it cannot be otherwise here. The scan only looks BELOW an
+# interface PATH entry of the form ${installPath}/<dir>. Every variant this
+# repo publishes puts its executables at the CONTENT ROOT — the archive has no
+# wrapper dir (`strip_components: 0`) and the raw-binary variants are a single
+# file — so the only honest PATH entry is a bare ${installPath} and there is
+# nothing below it to scan. `auto` or `verify` is rejected at spec load with
+# exit 65 ("bin_scan is enabled but … declares no interface-visible
+# ${installPath}/<dir> PATH entry"); `verify` in particular would inspect no
+# file and pass green whatever the archive contained. `off` plus a hand-listed
+# `binaries` per variant is the blessed shape — see toxiproxy/mirror.yml's
+# `metadata:` block.
+bin_scan: off
+
+# ─── Platform matrix ────────────────────────────────────────────────────────
+#
+# `os.features` states what an artifact REQUIRES OF THE HOST — it is not a
+# label for how it was built. toxiproxy is a pure-Go build: measured on
+# v2.12.0, both binaries on both Linux arches are fully static, no PT_INTERP
+# and no DT_NEEDED (evidence above toxiproxy/mirror.yml's `variants:`), and
+# upstream publishes no musl/glibc split to choose between. So both Linux keys
+# are BARE. Tagging them `+libc.musl` would be a false requirement that hid
+# them from every glibc host.
+#
+# A bare key claims universality, so it must prove it: ubuntu (glibc) + alpine
+# (musl) + fedora (different glibc vintage). The alpine leg IS the proof —
+# drop it and the universal claim is merely asserted.
+#
+# A future package here whose libc measurement differs must restate this whole
+# block in its own spec — see the shallow-merge warning at the top.
+platforms:
+  linux/amd64:
+    runner: ubuntu-latest
+    containers:
+      - { image: "ubuntu:24.04", shell: bash }
+      - { image: "alpine:3.20",  shell: sh }
+      - { image: "fedora:40",    shell: bash }
+  linux/arm64:
+    # arm64 container legs run natively — no qemu — so the runner arch must
+    # match the platform or the renderer reds the leg up front.
+    runner: ubuntu-24.04-arm
+    containers:
+      - { image: "ubuntu:24.04", shell: bash }
+      - { image: "alpine:3.20",  shell: sh }
+      - { image: "fedora:40",    shell: bash }
+  darwin/amd64:
+    # Intel slice tested on the arm64 macos-14 runner via Rosetta 2 — GitHub's
+    # native macos-13 Intel pool is exhausted and deadlocks the push job.
+    runner: macos-14
+    prefix: ["arch", "-x86_64"]
+  darwin/arm64:
+    runner: macos-14
+    shell: bash
+  # No windows/arm64: upstream ships no windows arm64 asset in any variant
+  # (verified across v2.5.0 … v2.12.0), and declaring it would resolve zero
+  # assets and be SILENTLY SKIPPED rather than red.
+  windows/amd64:
+    runner: windows-latest
+    shell: pwsh
+  # No `containers:` on darwin or windows — those runners have no Linux
+  # container engine, and the key is rejected at spec load.
+
+notify:
+  discord:
+    webhook_secret: OCX_MIRROR_DISCORD_HOOK
+    user_id: "227748867204972545"  # pinged in-message on failures
