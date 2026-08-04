@@ -6,7 +6,7 @@ name: toxiproxy
 
 on:
   schedule:
-    - cron: '0 */6 * * *'
+    - cron: '13 1-23/6 * * *'
   workflow_dispatch:
   push:
     branches: [main]

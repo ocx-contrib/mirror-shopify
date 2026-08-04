@@ -152,7 +152,7 @@ versions:
   # axis, so one version costs three entries. 6 = two whole versions per run,
   # so no run ever publishes a version with a variant missing.
   new_per_run: 6
-  poll_interval: "0 */6 * * *"
+  poll_interval: "13 1-23/6 * * *"
 
 tests:
   # `script:` resolves from the REPOSITORY ROOT — unlike `metadata.default` and
